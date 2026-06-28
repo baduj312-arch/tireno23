@@ -10,6 +10,7 @@ import { mockCurrentJob } from '../data/mock';
 export default function Tracking() {
   const navigate = useNavigate();
   const { position: driverPos } = useGeolocation();
+  const heading = driverPos.heading;
   const provider = mockCurrentJob.provider;
 
   // Provider starts away and moves toward driver (simulated)
@@ -85,6 +86,7 @@ export default function Tracking() {
           onChatClick={() => navigate('/chat/1')}
           etaText={eta.text}
           distanceText={distance.text}
+          heading={heading}
         />
       </div>
 

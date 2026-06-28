@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { GoogleMap, useJsApiLoader, Marker, DirectionsRenderer } from '@react-google-maps/api';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Navigation, Phone, MessageSquare, Car, Clock, Shield, Star } from 'lucide-react';
+import { Navigation, Phone, MessageSquare, Car, Clock, Shield, Star, MapPin, AlertTriangle } from 'lucide-react';
 
-const mapContainerStyle = { width: '100%', height: '100%', borderRadius: '0px' };
+const mapContainerStyle: React.CSSProperties = { width: '100%', height: '100%', borderRadius: '0px' };
 
-const darkMapStyles = [
+const darkMapStyles: google.maps.MapTypeStyle[] = [
   { elementType: 'geometry', stylers: [{ color: '#0f0f1a' }] },
   { elementType: 'labels.text.stroke', stylers: [{ color: '#0f0f1a' }] },
   { elementType: 'labels.text.fill', stylers: [{ color: '#8b8b9e' }] },
@@ -27,7 +27,10 @@ const darkMapStyles = [
 
 const libraries: ("places" | "geometry" | "drawing" | "visualization")[] = ['geometry'];
 
-interface GoogleMapProps {
+const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+const HAS_REAL_KEY = API_KEY && API_KEY !== 'YOUR_GOOGLE_MAPS_API_KEY' && !API_KEY.includes('Dummy');
+
+export interface GoogleMapProps {
   driverLocation?: { lat: number; lng: number };
   providerLocation?: { lat: number; lng: number };
   showRoute?: boolean;
@@ -51,6 +54,7 @@ interface GoogleMapProps {
   onChatClick?: () => void;
   etaText?: string;
   distanceText?: string;
+  heading?: number | null;
 }
 
 export default function GoogleMapComponent({
@@ -70,29 +74,64 @@ export default function GoogleMapComponent({
   onChatClick,
   etaText,
   distanceText,
+  heading = null,
 }: GoogleMapProps) {
-  const { isLoaded } = useJsApiLoader({
-    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyDummyKeyForDemo',
+  const [loadError, setLoadError] = useState(!HAS_REAL_KEY);
+  const { isLoaded, loadError: googleError } = useJsApiLoader({
+    googleMapsApiKey: API_KEY || '',
     libraries,
   });
 
   const [directions, setDirections] = useState<google.maps.DirectionsResult | null>(null);
   const [map, setMap] = useState<google.maps.Map | null>(null);
-  const [center, setCenter] = useState(driverLocation);
   const [showBottomSheet, setShowBottomSheet] = useState(isUberStyle);
   const directionsServiceRef = useRef<google.maps.DirectionsService | null>(null);
+  const trafficLayerRef = useRef<google.maps.TrafficLayer | null>(null);
+  const driverMarkerRef = useRef<google.maps.Marker | null>(null);
+  const providerMarkerRef = useRef<google.maps.Marker | null>(null);
 
-  // Update center when driver moves
+  // Detect Google Maps load error
   useEffect(() => {
-    setCenter(driverLocation);
-    if (map) {
-      map.panTo(driverLocation);
+    if (googleError) {
+      setLoadError(true);
     }
-  }, [driverLocation, map]);
+  }, [googleError]);
 
-  // Calculate route
-  const calculateRoute = useCallback(() => {
-    if (!isLoaded || !providerLocation || !driverLocation) return;
+  // Initialize traffic layer when map loads
+  const onMapLoad = useCallback((m: google.maps.Map) => {
+    setMap(m);
+    if (isUberStyle) {
+      const trafficLayer = new google.maps.TrafficLayer();
+      trafficLayer.setMap(m);
+      trafficLayerRef.current = trafficLayer;
+    }
+  }, [isUberStyle]);
+
+  // Smoothly pan camera to center between driver and provider
+  useEffect(() => {
+    if (!map || !providerLocation || !driverLocation) return;
+
+    const dLat = Math.abs(driverLocation.lat - providerLocation.lat);
+    const dLng = Math.abs(driverLocation.lng - providerLocation.lng);
+    const zoom = dLat < 0.005 && dLng < 0.005 ? 17 : 15;
+
+    map.panTo({
+      lat: (driverLocation.lat + providerLocation.lat) / 2,
+      lng: (driverLocation.lng + providerLocation.lng) / 2,
+    });
+
+    const listener = google.maps.event.addListenerOnce(map, 'idle', () => {
+      map.setZoom(zoom);
+    });
+
+    return () => {
+      google.maps.event.removeListener(listener);
+    };
+  }, [map, driverLocation, providerLocation]);
+
+  // Calculate and display route
+  useEffect(() => {
+    if (!isLoaded || !providerLocation || !driverLocation || loadError) return;
     if (!directionsServiceRef.current) {
       directionsServiceRef.current = new google.maps.DirectionsService();
     }
@@ -108,32 +147,70 @@ export default function GoogleMapComponent({
         }
       }
     );
-  }, [isLoaded, providerLocation, driverLocation]);
+  }, [isLoaded, providerLocation, driverLocation, loadError]);
 
+  // Create / update driver marker with rotation
   useEffect(() => {
-    if (showRoute && providerLocation) {
-      calculateRoute();
-    }
-  }, [showRoute, providerLocation, calculateRoute]);
+    if (!map || !showDriverMarker || loadError) return;
 
-  // Fit bounds to show both markers
+    const h = heading || 0;
+    const svgIcon = encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><circle cx="16" cy="16" r="10" fill="#FF6B2C" stroke="#fff" stroke-width="2"/><circle cx="16" cy="16" r="4" fill="white" opacity="0.5"/><polygon points="16,6 18,14 16,12 14,14" fill="white" transform="rotate(${h}, 16, 16)"/></svg>`
+    );
+
+    if (driverMarkerRef.current) {
+      driverMarkerRef.current.setPosition(driverLocation);
+      driverMarkerRef.current.setIcon({
+        url: `data:image/svg+xml;utf8,${svgIcon}`,
+        scaledSize: new google.maps.Size(32, 32),
+        anchor: new google.maps.Point(16, 16),
+      });
+    } else {
+      driverMarkerRef.current = new google.maps.Marker({
+        position: driverLocation,
+        map,
+        icon: {
+          url: `data:image/svg+xml;utf8,${svgIcon}`,
+          scaledSize: new google.maps.Size(32, 32),
+          anchor: new google.maps.Point(16, 16),
+        },
+        zIndex: 100,
+      });
+    }
+  }, [map, driverLocation, heading, showDriverMarker, loadError]);
+
+  // Create / update provider marker with car icon
   useEffect(() => {
-    if (map && providerLocation && driverLocation) {
-      const bounds = new google.maps.LatLngBounds();
-      bounds.extend(driverLocation);
-      bounds.extend(providerLocation);
-      map.fitBounds(bounds, { top: 50, bottom: 200, left: 50, right: 50 });
-    }
-  }, [map, providerLocation, driverLocation]);
+    if (!map || !showProviderMarker || !providerLocation || loadError) return;
 
-  const getMarkerIcon = (color: string, isPulse = false) => ({
-    path: google.maps.SymbolPath.CIRCLE,
-    fillColor: color,
-    fillOpacity: isPulse ? 0.3 : 1,
-    strokeColor: '#fff',
-    strokeWeight: 2,
-    scale: isPulse ? 16 : 10,
-  });
+    const svgCar = encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28"><rect x="4" y="8" width="20" height="12" rx="3" fill="#22C55E" stroke="#fff" stroke-width="2"/><rect x="8" y="12" width="4" height="4" rx="1" fill="white" opacity="0.7"/><rect x="16" y="12" width="4" height="4" rx="1" fill="white" opacity="0.7"/><rect x="10" y="6" width="8" height="4" rx="2" fill="#22C55E" stroke="#fff" stroke-width="1.5"/></svg>`
+    );
+
+    if (providerMarkerRef.current) {
+      providerMarkerRef.current.setPosition(providerLocation);
+    } else {
+      providerMarkerRef.current = new google.maps.Marker({
+        position: providerLocation,
+        map,
+        icon: {
+          url: `data:image/svg+xml;utf8,${svgCar}`,
+          scaledSize: new google.maps.Size(28, 28),
+          anchor: new google.maps.Point(14, 14),
+        },
+        zIndex: 101,
+      });
+    }
+  }, [map, providerLocation, showProviderMarker, loadError]);
+
+  // Cleanup markers on unmount
+  useEffect(() => {
+    return () => {
+      driverMarkerRef.current?.setMap(null);
+      providerMarkerRef.current?.setMap(null);
+      trafficLayerRef.current?.setMap(null);
+    };
+  }, []);
 
   const getSosColor = (type: string) => {
     switch (type) {
@@ -145,7 +222,97 @@ export default function GoogleMapComponent({
     }
   };
 
-  if (!isLoaded) {
+  // Fallback map when no API key
+  const FallbackMap = () => {
+    const dLat = driverLocation?.lat ?? 5.6037;
+    const dLng = driverLocation?.lng ?? -0.1870;
+    const pLat = providerLocation?.lat ?? dLat + 0.003;
+    const pLng = providerLocation?.lng ?? dLng + 0.002;
+    return (
+      <div className="relative w-full h-full bg-[#0f0f1a] overflow-hidden">
+        {/* Grid background */}
+        <div className="absolute inset-0" style={{
+          backgroundImage: 'linear-gradient(rgba(255,107,44,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,107,44,0.04) 1px, transparent 1px)',
+          backgroundSize: '28px 28px'
+        }} />
+
+        {/* Roads */}
+        <div className="absolute top-[30%] left-0 right-0 h-[2px] bg-[#1e1e2e]" />
+        <div className="absolute top-[60%] left-0 right-0 h-[2px] bg-[#1e1e2e]" />
+        <div className="absolute top-0 bottom-0 left-[25%] w-[2px] bg-[#1e1e2e]" />
+        <div className="absolute top-0 bottom-0 left-[70%] w-[2px] bg-[#1e1e2e]" />
+
+        {/* Route path */}
+        <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <motion.path
+            d={`M ${20 + (dLng + 0.187) * 2000} ${75 - (dLat - 5.603) * 2000} Q 50 50 ${20 + (pLng + 0.187) * 2000} ${75 - (pLat - 5.603) * 2000}`}
+            stroke="#FF6B2C"
+            strokeWidth="0.5"
+            strokeDasharray="2 2"
+            fill="none"
+            initial={{ pathLength: 0 }}
+            animate={{ pathLength: 1 }}
+            transition={{ duration: 2, ease: 'easeInOut' }}
+          />
+        </svg>
+
+        {/* Driver marker */}
+        <div
+          className="absolute w-8 h-8 -translate-x-1/2 -translate-y-1/2"
+          style={{ left: `${20 + (dLng + 0.187) * 2000}%`, top: `${75 - (dLat - 5.603) * 2000}%` }}
+        >
+          <div className="relative w-full h-full">
+            <div className="absolute inset-0 rounded-full bg-tireno-orange/30 animate-ping" />
+            <div className="absolute inset-1 rounded-full bg-tireno-orange border-2 border-white flex items-center justify-center">
+              <Navigation size={14} className="text-white" style={{ transform: `rotate(${heading || 0}deg)` }} />
+            </div>
+          </div>
+        </div>
+
+        {/* Provider marker */}
+        <div
+          className="absolute w-7 h-7 -translate-x-1/2 -translate-y-1/2"
+          style={{ left: `${20 + (pLng + 0.187) * 2000}%`, top: `${75 - (pLat - 5.603) * 2000}%` }}
+        >
+          <div className="w-full h-full rounded-full bg-tireno-green border-2 border-white flex items-center justify-center">
+            <Car size={14} className="text-white" />
+          </div>
+        </div>
+
+        {/* Nearby providers */}
+        {showNearbyProviders.map((p, i) => (
+          <div
+            key={i}
+            className="absolute w-4 h-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-tireno-blue/70 border border-white/50"
+            style={{ left: `${20 + (p.lng + 0.187) * 2000}%`, top: `${75 - (p.lat - 5.603) * 2000}%` }}
+          />
+        ))}
+
+        {/* SOS markers for admin */}
+        {isAdmin && sosMarkers.map((sos, i) => (
+          <div
+            key={i}
+            className="absolute w-4 h-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white animate-ping"
+            style={{ left: `${20 + (sos.lng + 0.187) * 2000}%`, top: `${75 - (sos.lat - 5.603) * 2000}%`, backgroundColor: getSosColor(sos.type) }}
+          />
+        ))}
+
+        {/* Traffic overlay */}
+        <div className="absolute top-[30%] left-[25%] w-[45%] h-[2px] bg-tireno-red/30" />
+        <div className="absolute top-[60%] left-[70%] w-[10%] h-[2px] bg-tireno-green/30" />
+
+        {/* API key warning */}
+        <div className="absolute top-4 left-4 right-4">
+          <div className="bg-tireno-dark/90 backdrop-blur-sm rounded-xl px-4 py-2 border border-tireno-yellow/20 flex items-center gap-2">
+            <AlertTriangle size={14} className="text-tireno-yellow shrink-0" />
+            <span className="text-tireno-yellow text-xs">Add a Google Maps API key to enable real maps</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  if (!isLoaded && !loadError) {
     return (
       <div className="w-full h-full bg-[#0f0f1a] flex flex-col items-center justify-center">
         <div className="w-10 h-10 rounded-xl bg-tireno-orange/10 flex items-center justify-center mb-3">
@@ -156,11 +323,59 @@ export default function GoogleMapComponent({
     );
   }
 
+  if (loadError || !isLoaded) {
+    return (
+      <div className="relative w-full h-full">
+        <FallbackMap />
+        {/* Uber overlays still work on fallback */}
+        {isUberStyle && (
+          <>
+            <div className="absolute top-0 left-0 right-0 p-4">
+              <div className="flex items-center justify-between">
+                <div className="bg-tireno-dark/90 backdrop-blur-sm rounded-xl px-4 py-2 border border-white/[0.06]">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-tireno-orange animate-pulse" />
+                    <span className="text-white text-sm font-medium">Live Tracking</span>
+                  </div>
+                </div>
+                <div className="bg-tireno-dark/90 backdrop-blur-sm rounded-xl px-4 py-2 border border-white/[0.06]">
+                  <div className="flex items-center gap-2">
+                    <Clock size={14} className="text-tireno-orange" />
+                    <span className="text-white text-sm font-medium">{etaText || '4 min'}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <BottomSheet
+              providerInfo={providerInfo}
+              etaText={etaText}
+              distanceText={distanceText}
+              onPhoneClick={onPhoneClick}
+              onChatClick={onChatClick}
+              showBottomSheet={showBottomSheet}
+              setShowBottomSheet={setShowBottomSheet}
+            />
+          </>
+        )}
+        {isAdmin && (
+          <div className="absolute bottom-4 left-4 bg-tireno-dark/80 backdrop-blur-sm rounded-xl p-3 border border-white/[0.06]">
+            <div className="flex items-center gap-3 text-white/40 text-[10px]">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-tireno-orange" /> Mechanic</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-tireno-blue" /> Tow</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-tireno-yellow" /> Fuel</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-tireno-green" /> Battery</span>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="relative w-full h-full">
       <GoogleMap
         mapContainerStyle={{ ...mapContainerStyle, height }}
-        center={center}
+        center={driverLocation}
         zoom={15}
         options={{
           mapTypeId: 'roadmap',
@@ -171,44 +386,12 @@ export default function GoogleMapComponent({
           fullscreenControl: false,
           styles: darkMapStyles,
           gestureHandling: 'greedy',
+          tilt: isUberStyle ? 45 : 0,
         }}
-        onLoad={setMap}
+        onLoad={onMapLoad}
         onClick={onMapClick}
       >
-        {/* Driver Marker with pulse ring */}
-        {showDriverMarker && (
-          <>
-            <Marker
-              position={driverLocation}
-              icon={getMarkerIcon('#FF6B2C', true)}
-              zIndex={10}
-            />
-            <Marker
-              position={driverLocation}
-              icon={getMarkerIcon('#FF6B2C', false)}
-              zIndex={11}
-            />
-          </>
-        )}
-
-        {/* Provider Marker with car icon */}
-        {showProviderMarker && providerLocation && (
-          <Marker
-            position={providerLocation}
-            icon={{
-              path: google.maps.SymbolPath.CIRCLE,
-              fillColor: '#22C55E',
-              fillOpacity: 1,
-              strokeColor: '#fff',
-              strokeWeight: 3,
-              scale: 12,
-            }}
-            zIndex={12}
-            animation={google.maps.Animation.BOUNCE}
-          />
-        )}
-
-        {/* Nearby Providers */}
+        {/* React-Marker for nearby providers */}
         {showNearbyProviders.map((p, i) => (
           <Marker
             key={i}
@@ -278,80 +461,16 @@ export default function GoogleMapComponent({
         </div>
       )}
 
-      {/* Uber-style Bottom Sheet */}
-      <AnimatePresence>
-        {isUberStyle && showBottomSheet && providerInfo && (
-          <motion.div
-            initial={{ y: 300 }}
-            animate={{ y: 0 }}
-            exit={{ y: 300 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            className="absolute bottom-0 left-0 right-0 bg-tireno-dark/95 backdrop-blur-xl border-t border-white/[0.06] rounded-t-3xl overflow-hidden"
-            style={{ maxHeight: '60%' }}
-          >
-            {/* Drag handle */}
-            <div className="flex items-center justify-center py-2">
-              <button
-                onClick={() => setShowBottomSheet(!showBottomSheet)}
-                className="w-12 h-1 rounded-full bg-white/20"
-              />
-            </div>
-
-            {/* Provider Info */}
-            <div className="px-4 pb-6">
-              {/* ETA Banner */}
-              <div className="flex items-center justify-center gap-2 mb-4">
-                <div className="bg-tireno-orange/10 rounded-full px-4 py-2 border border-tireno-orange/20 flex items-center gap-2">
-                  <Car size={16} className="text-tireno-orange" />
-                  <span className="text-tireno-orange font-bold text-sm">Arriving in {etaText || '4 min'}</span>
-                </div>
-                <div className="bg-white/[0.03] rounded-full px-4 py-2 border border-white/[0.06] flex items-center gap-2">
-                  <Navigation size={14} className="text-white/40" />
-                  <span className="text-white/40 text-sm">{distanceText || '2.3 km'}</span>
-                </div>
-              </div>
-
-              {/* Provider Card */}
-              <div className="flex items-center gap-4 mb-4">
-                <div className="w-14 h-14 rounded-full bg-gradient-to-br from-tireno-orange to-tireno-orangeDark flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-tireno-orange/20">
-                  {providerInfo.avatar}
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-white font-bold text-base">{providerInfo.name}</span>
-                    <div className="flex items-center gap-1 bg-tireno-yellow/10 rounded-full px-2 py-0.5">
-                      <Star size={12} className="text-tireno-yellow fill-tireno-yellow" />
-                      <span className="text-tireno-yellow text-xs font-bold">{providerInfo.rating}</span>
-                    </div>
-                  </div>
-                  <p className="text-white/40 text-sm">{providerInfo.carModel || 'Toyota Pickup'} • {providerInfo.plateNumber || 'GR-1234-20'}</p>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={onPhoneClick}
-                    className="w-12 h-12 rounded-full bg-tireno-green/10 flex items-center justify-center border border-tireno-green/20 hover:bg-tireno-green/20 transition-colors"
-                  >
-                    <Phone size={20} className="text-tireno-green" />
-                  </button>
-                  <button
-                    onClick={onChatClick}
-                    className="w-12 h-12 rounded-full bg-tireno-orange/10 flex items-center justify-center border border-tireno-orange/20 hover:bg-tireno-orange/20 transition-colors"
-                  >
-                    <MessageSquare size={20} className="text-tireno-orange" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Safety Badge */}
-              <div className="flex items-center gap-2 bg-white/[0.03] rounded-xl px-4 py-3 border border-white/[0.06]">
-                <Shield size={18} className="text-tireno-green" />
-                <span className="text-white/60 text-sm">Ride-or-Tow safety active</span>
-                <span className="text-tireno-green text-xs ml-auto">3 contacts</span>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Bottom Sheet */}
+      <BottomSheet
+        providerInfo={providerInfo}
+        etaText={etaText}
+        distanceText={distanceText}
+        onPhoneClick={onPhoneClick}
+        onChatClick={onChatClick}
+        showBottomSheet={showBottomSheet}
+        setShowBottomSheet={setShowBottomSheet}
+      />
 
       {/* Map legend for admin */}
       {isAdmin && (
@@ -365,5 +484,102 @@ export default function GoogleMapComponent({
         </div>
       )}
     </div>
+  );
+}
+
+// Bottom Sheet component
+function BottomSheet({
+  providerInfo,
+  etaText,
+  distanceText,
+  onPhoneClick,
+  onChatClick,
+  showBottomSheet,
+  setShowBottomSheet,
+}: {
+  providerInfo?: GoogleMapProps['providerInfo'];
+  etaText?: string;
+  distanceText?: string;
+  onPhoneClick?: () => void;
+  onChatClick?: () => void;
+  showBottomSheet: boolean;
+  setShowBottomSheet: (v: boolean) => void;
+}) {
+  if (!providerInfo) return null;
+
+  return (
+    <AnimatePresence>
+      {showBottomSheet && (
+        <motion.div
+          initial={{ y: 300 }}
+          animate={{ y: 0 }}
+          exit={{ y: 300 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+          className="absolute bottom-0 left-0 right-0 bg-tireno-dark/95 backdrop-blur-xl border-t border-white/[0.06] rounded-t-3xl overflow-hidden"
+          style={{ maxHeight: '60%' }}
+        >
+          {/* Drag handle */}
+          <div className="flex items-center justify-center py-2">
+            <button
+              onClick={() => setShowBottomSheet(!showBottomSheet)}
+              className="w-12 h-1 rounded-full bg-white/20"
+            />
+          </div>
+
+          {/* Provider Info */}
+          <div className="px-4 pb-6">
+            {/* ETA Banner */}
+            <div className="flex items-center justify-center gap-2 mb-4">
+              <div className="bg-tireno-orange/10 rounded-full px-4 py-2 border border-tireno-orange/20 flex items-center gap-2">
+                <Car size={16} className="text-tireno-orange" />
+                <span className="text-tireno-orange font-bold text-sm">Arriving in {etaText || '4 min'}</span>
+              </div>
+              <div className="bg-white/[0.03] rounded-full px-4 py-2 border border-white/[0.06] flex items-center gap-2">
+                <MapPin size={14} className="text-white/40" />
+                <span className="text-white/40 text-sm">{distanceText || '2.3 km'}</span>
+              </div>
+            </div>
+
+            {/* Provider Card */}
+            <div className="flex items-center gap-4 mb-4">
+              <div className="w-14 h-14 rounded-full bg-gradient-to-br from-tireno-orange to-tireno-orangeDark flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-tireno-orange/20">
+                {providerInfo.avatar}
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-white font-bold text-base">{providerInfo.name}</span>
+                  <div className="flex items-center gap-1 bg-tireno-yellow/10 rounded-full px-2 py-0.5">
+                    <Star size={12} className="text-tireno-yellow fill-tireno-yellow" />
+                    <span className="text-tireno-yellow text-xs font-bold">{providerInfo.rating}</span>
+                  </div>
+                </div>
+                <p className="text-white/40 text-sm">{providerInfo.carModel || 'Toyota Pickup'} • {providerInfo.plateNumber || 'GR-1234-20'}</p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={onPhoneClick}
+                  className="w-12 h-12 rounded-full bg-tireno-green/10 flex items-center justify-center border border-tireno-green/20 hover:bg-tireno-green/20 transition-colors"
+                >
+                  <Phone size={20} className="text-tireno-green" />
+                </button>
+                <button
+                  onClick={onChatClick}
+                  className="w-12 h-12 rounded-full bg-tireno-orange/10 flex items-center justify-center border border-tireno-orange/20 hover:bg-tireno-orange/20 transition-colors"
+                >
+                  <MessageSquare size={20} className="text-tireno-orange" />
+                </button>
+              </div>
+            </div>
+
+            {/* Safety Badge */}
+            <div className="flex items-center gap-2 bg-white/[0.03] rounded-xl px-4 py-3 border border-white/[0.06]">
+              <Shield size={18} className="text-tireno-green" />
+              <span className="text-white/60 text-sm">Ride-or-Tow safety active</span>
+              <span className="text-tireno-green text-xs ml-auto">3 contacts</span>
+            </div>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

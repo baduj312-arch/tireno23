@@ -4,10 +4,13 @@ import { motion } from 'framer-motion';
 import { useState } from 'react';
 import Layout from '../components/Layout';
 import AIAssistant from '../components/AIAssistant';
+import GoogleMapComponent from '../components/GoogleMap';
+import { useGeolocation } from '../hooks/useGeolocation';
 import { mockCurrentJob } from '../data/mock';
 
 export default function Home() {
   const navigate = useNavigate();
+  const { position: driverPos } = useGeolocation();
   const [aiOpen, setAiOpen] = useState(false);
 
   const services = [
@@ -21,6 +24,12 @@ export default function Home() {
     { label: 'Response', value: '3.2m', icon: Clock },
     { label: 'Success', value: '98%', icon: TrendingUp },
     { label: 'Providers', value: '342', icon: Zap },
+  ];
+
+  const nearbyProviders = [
+    { lat: driverPos.lat + 0.002, lng: driverPos.lng + 0.001, name: 'Kwame Osei', category: 'mechanic' },
+    { lat: driverPos.lat - 0.001, lng: driverPos.lng + 0.002, name: 'Ama Mensah', category: 'mechanic' },
+    { lat: driverPos.lat + 0.001, lng: driverPos.lng - 0.001, name: 'Yaw Addo', category: 'mechanic' },
   ];
 
   return (
@@ -57,28 +66,33 @@ export default function Home() {
             </div>
           </motion.div>
 
-          {/* Mini Map Teaser */}
+          {/* Live Map Preview */}
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="card-dark rounded-2xl h-32 mb-4 relative overflow-hidden"
+            className="card-dark rounded-2xl h-40 mb-4 overflow-hidden relative"
             onClick={() => navigate('/sos')}
           >
-            <div className="absolute inset-0" style={{
-              backgroundImage: 'linear-gradient(rgba(255,107,44,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,107,44,0.06) 1px, transparent 1px)',
-              backgroundSize: '28px 28px'
-            }} />
-            <div className="absolute inset-0 bg-gradient-to-b from-transparent to-tireno-dark/90" />
-            <div className="absolute top-3 left-3 flex items-center gap-2 bg-tireno-dark/80 backdrop-blur-sm rounded-lg px-3 py-1.5 border border-white/[0.06]">
+            <div className="absolute inset-0 z-0">
+              <GoogleMapComponent
+                driverLocation={driverPos}
+                showNearbyProviders={nearbyProviders}
+                showProviderMarker={false}
+                showDriverMarker={true}
+                height="100%"
+              />
+            </div>
+            <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-tireno-dark/90 z-10 pointer-events-none" />
+            <div className="absolute top-3 left-3 z-20 flex items-center gap-2 bg-tireno-dark/90 backdrop-blur-sm rounded-lg px-3 py-1.5 border border-white/[0.06]">
               <MapPin size={14} className="text-tireno-orange" />
               <span className="text-white/80 text-xs font-medium">Accra, Ghana</span>
             </div>
-            <div className="absolute top-3 right-3 flex items-center gap-1 bg-tireno-green/10 backdrop-blur-sm rounded-lg px-3 py-1.5 border border-tireno-green/20">
+            <div className="absolute top-3 right-3 z-20 flex items-center gap-1 bg-tireno-green/10 backdrop-blur-sm rounded-lg px-3 py-1.5 border border-tireno-green/20">
               <div className="w-2 h-2 rounded-full bg-tireno-green animate-pulse" />
-              <span className="text-tireno-green text-xs font-medium">132 online</span>
+              <span className="text-tireno-green text-xs font-medium">3 nearby</span>
             </div>
-            <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between">
+            <div className="absolute bottom-3 left-3 right-3 z-20 flex items-center justify-between pointer-events-none">
               <span className="text-white/60 text-xs">Tap to request help</span>
               <Navigation size={16} className="text-tireno-orange" />
             </div>

@@ -1,24 +1,27 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Phone, MessageSquare, Check, Circle, Shield } from 'lucide-react';
-import Layout from '../components/Layout';
-import Header from '../components/Header';
+import { Check, Circle, Shield, X } from 'lucide-react';
+
+import GoogleMapComponent from '../components/GoogleMap';
+import { useGeolocation, useSimulatedProviderMovement, useDistanceAndEta } from '../hooks/useGeolocation';
 import { mockCurrentJob } from '../data/mock';
-import GoogleMap from '../components/GoogleMap';
 
 export default function Tracking() {
   const navigate = useNavigate();
+  const { position: driverPos } = useGeolocation();
   const provider = mockCurrentJob.provider;
-  const safetyContacts = [
-    { name: 'Dad', phone: '0244...' },
-    { name: 'Mom', phone: '0245...' },
-    { name: 'Wife', phone: '0246...' },
-  ];
 
-  const [driverLocation, setDriverLocation] = useState({ lat: 5.6037, lng: -0.1870 });
-  const [providerLocation, setProviderLocation] = useState({ lat: 5.6057, lng: -0.1850 });
-  const [eta, setEta] = useState('4 min');
+  // Provider starts away and moves toward driver (simulated)
+  const providerStart = { lat: driverPos.lat + 0.005, lng: driverPos.lng + 0.003 };
+  const providerEnd = { lat: driverPos.lat + 0.0005, lng: driverPos.lng + 0.0003 };
+  const providerPos = useSimulatedProviderMovement(
+    providerStart.lat, providerStart.lng,
+    providerEnd.lat, providerEnd.lng,
+    120000 // 2 minutes simulation
+  );
+
+  const { distance, eta } = useDistanceAndEta(driverPos, providerPos);
 
   const [steps, setSteps] = useState([
     { label: 'Request Sent', done: true, active: false },
@@ -28,56 +31,7 @@ export default function Tracking() {
     { label: 'Completed', done: false, active: false },
   ]);
 
-  // Simulate real-time provider movement
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setProviderLocation(prev => ({
-        lat: prev.lat + (Math.random() - 0.5) * 0.0005,
-        lng: prev.lng + (Math.random() - 0.5) * 0.0005,
-      }));
-    }, 3000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Simulate ETA countdown
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const currentMinutes = parseInt(eta.split(' ')[0]);
-      if (currentMinutes > 1) {
-        setEta(`${currentMinutes - 1} min`);
-      }
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [eta]);
-
-  // Get driver's real location
-  useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setDriverLocation({
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-          });
-        },
-        () => {},
-        { enableHighAccuracy: true }
-      );
-
-      const watchId = navigator.geolocation.watchPosition(
-        (pos) => {
-          setDriverLocation({
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-          });
-        },
-        () => {},
-        { enableHighAccuracy: true, maximumAge: 10000 }
-      );
-
-      return () => navigator.geolocation.clearWatch(watchId);
-    }
-  }, []);
+  const [showTimeline, setShowTimeline] = useState(false);
 
   const handleComplete = useCallback(() => {
     setSteps(prev => prev.map((s, i) => ({
@@ -88,99 +42,116 @@ export default function Tracking() {
     setTimeout(() => navigate('/payment'), 1000);
   }, [navigate]);
 
+  const safetyContacts = [
+    { name: 'Dad', phone: '0244...' },
+    { name: 'Mom', phone: '0245...' },
+    { name: 'Wife', phone: '0246...' },
+  ];
+
   return (
-    <Layout>
-      <Header
-        title="Live Tracking"
-        right={
-          <button onClick={() => navigate('/chat/1')} className="w-9 h-9 rounded-xl bg-white/[0.03] border border-white/[0.06] flex items-center justify-center hover:bg-white/[0.06] transition-colors">
-            <MessageSquare size={18} className="text-tireno-orange" />
+    <div className="min-h-screen bg-tireno-dark flex flex-col">
+      {/* Header */}
+      <header className="sticky top-0 z-40 bg-tireno-dark/80 backdrop-blur-xl border-b border-white/[0.06]">
+        <div className="max-w-lg mx-auto flex items-center h-14 px-4">
+          <button
+            onClick={() => navigate(-1)}
+            className="w-9 h-9 -ml-1 rounded-xl bg-white/[0.03] border border-white/[0.06] flex items-center justify-center hover:bg-white/[0.06] transition-colors"
+          >
+            <X size={18} className="text-white/70" />
           </button>
-        }
-      />
-      <div className="p-4 pb-6">
-        {/* Google Map */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-4"
+          <h1 className="flex-1 text-center text-lg font-semibold text-white pr-8">Live Tracking</h1>
+        </div>
+      </header>
+
+      {/* Full-screen Map */}
+      <div className="flex-1 relative" style={{ minHeight: '50vh' }}>
+        <GoogleMapComponent
+          driverLocation={driverPos}
+          providerLocation={providerPos}
+          showRoute={true}
+          height="100%"
+          showProviderMarker={true}
+          showDriverMarker={true}
+          isUberStyle={true}
+          providerInfo={{
+            name: provider.name,
+            avatar: provider.avatar,
+            rating: provider.rating,
+            carModel: 'Toyota Hiace',
+            plateNumber: 'GR-2847-21',
+            phone: provider.phone,
+          }}
+          onPhoneClick={() => {}}
+          onChatClick={() => navigate('/chat/1')}
+          etaText={eta.text}
+          distanceText={distance.text}
+        />
+      </div>
+
+      {/* Timeline Toggle */}
+      <div className="max-w-lg mx-auto w-full px-4 -mt-6 relative z-10">
+        <motion.button
+          whileTap={{ scale: 0.98 }}
+          onClick={() => setShowTimeline(!showTimeline)}
+          className="w-full card-dark p-3 flex items-center justify-between border border-white/[0.06]"
         >
-          <GoogleMap
-            driverLocation={driverLocation}
-            providerLocation={providerLocation}
-            showRoute={true}
-            height="280px"
-            showProviderMarker={true}
-            showDriverMarker={true}
-          />
-        </motion.div>
-
-        {/* Provider Mini Card */}
-        <div className="card-dark p-4 mb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-full gradient-orange flex items-center justify-center text-white font-bold text-sm shadow-lg shadow-tireno-orange/20">
-              {provider.avatar}
-            </div>
-            <div className="flex-1">
-              <p className="text-white font-medium text-sm">{provider.name}</p>
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-tireno-orange animate-pulse" />
-                <span className="text-tireno-orange text-xs font-medium">En Route ETA {eta}</span>
-              </div>
-            </div>
-            <button className="w-10 h-10 rounded-xl bg-white/[0.03] border border-white/[0.06] flex items-center justify-center hover:bg-white/[0.06] transition-colors">
-              <Phone size={18} className="text-tireno-green" />
-            </button>
-            <button
-              onClick={() => navigate('/chat/1')}
-              className="w-10 h-10 rounded-xl bg-white/[0.03] border border-white/[0.06] flex items-center justify-center hover:bg-white/[0.06] transition-colors"
-            >
-              <MessageSquare size={18} className="text-tireno-orange" />
-            </button>
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-tireno-orange animate-pulse" />
+            <span className="text-white text-sm font-medium">{steps.find(s => s.active)?.label || 'En Route'}</span>
           </div>
-        </div>
+          <span className="text-white/30 text-xs">Tap for details</span>
+        </motion.button>
+      </div>
 
-        {/* Timeline */}
-        <div className="card-dark p-4 mb-4">
-          <h3 className="text-white font-semibold text-sm mb-4">Job Status</h3>
-          <div className="relative">
-            {steps.map((step, i) => (
-              <div key={step.label} className="flex items-start gap-3 mb-4 last:mb-0">
-                <div className="flex flex-col items-center">
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
-                    step.done ? 'bg-tireno-green' :
-                    step.active ? 'bg-tireno-orange animate-pulse' :
-                    'bg-white/[0.06]'
-                  }`}>
-                    {step.done ? <Check size={14} className="text-white" /> :
-                     step.active ? <Circle size={14} className="text-white" /> :
-                     <Circle size={14} className="text-white/30" />}
+      {/* Expandable Timeline */}
+      {showTimeline && (
+        <motion.div
+          initial={{ opacity: 1, height: 1 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          className="max-w-lg mx-auto w-full px-4 pb-4"
+        >
+          <div className="card-dark p-4 mt-2">
+            <div className="relative">
+              {steps.map((step, i) => (
+                <div key={step.label} className="flex items-start gap-3 mb-4 last:mb-0">
+                  <div className="flex flex-col items-center">
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
+                      step.done ? 'bg-tireno-green' :
+                      step.active ? 'bg-tireno-orange animate-pulse' :
+                      'bg-white/[0.06]'
+                    }`}>
+                      {step.done ? <Check size={14} className="text-white" /> :
+                       step.active ? <Circle size={14} className="text-white" /> :
+                       <Circle size={14} className="text-white/30" />}
+                    </div>
+                    {i < steps.length - 1 && (
+                      <div className={`w-0.5 h-6 mt-1 ${
+                        step.done ? 'bg-tireno-green' : 'bg-white/[0.06]'
+                      }`} />
+                    )}
                   </div>
-                  {i < steps.length - 1 && (
-                    <div className={`w-0.5 h-6 mt-1 ${
-                      step.done ? 'bg-tireno-green' : 'bg-white/[0.06]'
-                    }`} />
-                  )}
+                  <div className="pt-0.5">
+                    <span className={`text-sm font-medium ${
+                      step.done ? 'text-tireno-green' :
+                      step.active ? 'text-tireno-orange' :
+                      'text-white/30'
+                    }`}>
+                      {step.label}
+                    </span>
+                    {step.active && (
+                      <span className="text-tireno-orange text-xs block mt-0.5">In progress</span>
+                    )}
+                  </div>
                 </div>
-                <div className="pt-0.5">
-                  <span className={`text-sm font-medium ${
-                    step.done ? 'text-tireno-green' :
-                    step.active ? 'text-tireno-orange' :
-                    'text-white/30'
-                  }`}>
-                    {step.label}
-                  </span>
-                  {step.active && (
-                    <span className="text-tireno-orange text-xs block mt-0.5">In progress</span>
-                  )}
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
+        </motion.div>
+      )}
 
-        {/* Safety Card */}
-        <div className="card-dark p-4 mb-4 border border-tireno-green/20">
+      {/* Safety Card */}
+      <div className="max-w-lg mx-auto w-full px-4 pb-4">
+        <div className="card-dark p-4 border border-tireno-green/20">
           <div className="flex items-center gap-2 mb-3">
             <div className="w-8 h-8 rounded-lg bg-tireno-green/10 flex items-center justify-center border border-tireno-green/20">
               <Shield size={18} className="text-tireno-green" />
@@ -199,9 +170,11 @@ export default function Tracking() {
             ))}
           </div>
         </div>
+      </div>
 
-        {/* Payment Summary */}
-        <div className="card-dark p-4 mb-4">
+      {/* Payment Summary */}
+      <div className="max-w-lg mx-auto w-full px-4 pb-4">
+        <div className="card-dark p-4">
           <h3 className="text-white font-semibold text-sm mb-3">Payment Summary</h3>
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
@@ -217,8 +190,10 @@ export default function Tracking() {
             <span className="text-white font-bold text-lg">GH₵{mockCurrentJob.price}</span>
           </div>
         </div>
+      </div>
 
-        {/* Complete Job Button */}
+      {/* Complete Job Button */}
+      <div className="max-w-lg mx-auto w-full px-4 pb-4">
         <motion.button
           whileTap={{ scale: 0.95 }}
           onClick={handleComplete}
@@ -226,12 +201,10 @@ export default function Tracking() {
         >
           Mark as Complete
         </motion.button>
-
-        {/* Cancel Button */}
         <button className="w-full bg-tireno-red/5 border border-tireno-red/20 text-tireno-red py-4 rounded-xl font-semibold transition-all hover:bg-tireno-red/10 hover:border-tireno-red/30">
           Cancel Job
         </button>
       </div>
-    </Layout>
+    </div>
   );
 }

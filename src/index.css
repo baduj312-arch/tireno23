@@ -1,0 +1,135 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+  }
+  body {
+    background-color: #0D0D0D;
+    color: #FFFFFF;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  #root {
+    min-height: 100vh;
+  }
+  input, textarea, select {
+    background-color: #1A1A1A;
+    color: #FFFFFF;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+  }
+  input:focus, textarea:focus, select:focus {
+    outline: none;
+    border-color: #FF6B2C;
+    box-shadow: 0 0 0 3px rgba(255, 107, 44, 0.15);
+  }
+  button {
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #0D0D0D;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+  }
+}
+
+@layer components {
+  .card-dark {
+    @apply bg-white/[0.03] rounded-2xl border border-white/[0.06];
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+  .card-hover {
+    @apply transition-all duration-300;
+  }
+  .card-hover:hover {
+    @apply bg-white/[0.05] border-white/[0.12];
+  }
+  .btn-orange {
+    @apply bg-gradient-to-r from-[#FF6B2C] to-[#FF8A5B] hover:from-[#E55A1F] hover:to-[#FF6B2C] text-white font-semibold rounded-xl transition-all duration-200;
+    box-shadow: 0 4px 16px rgba(255, 107, 44, 0.3);
+  }
+  .btn-orange:active {
+    @apply scale-95;
+    box-shadow: 0 2px 8px rgba(255, 107, 44, 0.2);
+  }
+  .btn-ghost {
+    @apply bg-transparent border border-white/[0.08] text-white hover:bg-white/[0.05] rounded-xl transition-all duration-200;
+  }
+  .input-dark {
+    @apply bg-white/[0.03] border border-white/[0.08] rounded-xl px-4 py-3 text-white placeholder:text-white/30;
+  }
+  .badge-green {
+    @apply bg-[#22C55E]/10 text-[#22C55E] text-xs font-medium px-2.5 py-1 rounded-full border border-[#22C55E]/20;
+  }
+  .badge-orange {
+    @apply bg-[#FF6B2C]/10 text-[#FF6B2C] text-xs font-medium px-2.5 py-1 rounded-full border border-[#FF6B2C]/20;
+  }
+  .badge-red {
+    @apply bg-[#EF4444]/10 text-[#EF4444] text-xs font-medium px-2.5 py-1 rounded-full border border-[#EF4444]/20;
+  }
+  .badge-yellow {
+    @apply bg-[#EAB308]/10 text-[#EAB308] text-xs font-medium px-2.5 py-1 rounded-full border border-[#EAB308]/20;
+  }
+  .badge-blue {
+    @apply bg-[#3B82F6]/10 text-[#3B82F6] text-xs font-medium px-2.5 py-1 rounded-full border border-[#3B82F6]/20;
+  }
+  .gradient-orange {
+    background: linear-gradient(135deg, #FF6B2C 0%, #FF8A5B 50%, #E55A1F 100%);
+  }
+  .gradient-orange-soft {
+    background: linear-gradient(135deg, rgba(255, 107, 44, 0.15) 0%, rgba(255, 138, 91, 0.1) 100%);
+  }
+  .progress-bar {
+    @apply h-2 bg-white/[0.06] rounded-full overflow-hidden;
+  }
+  .progress-bar-fill {
+    @apply h-full bg-gradient-to-r from-[#FF6B2C] to-[#FF8A5B] rounded-full;
+  }
+  .text-gradient {
+    background: linear-gradient(135deg, #FF6B2C 0%, #FF8A5B 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .glow-orange {
+    box-shadow: 0 0 40px rgba(255, 107, 44, 0.2);
+  }
+  .glow-orange-sm {
+    box-shadow: 0 0 20px rgba(255, 107, 44, 0.15);
+  }
+  .shimmer {
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.04), transparent);
+    background-size: 200% 100%;
+    animation: shimmer 2s infinite;
+  }
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.8); opacity: 0.5; }
+  100% { transform: scale(1.4); opacity: 0; }
+}

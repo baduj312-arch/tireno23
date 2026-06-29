@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { importLibrary, setOptions } from '@googlemaps/js-api-loader';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Phone, MessageSquare, Car, Clock, Shield, Star, MapPin, AlertTriangle } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { MapPin, AlertTriangle, Car } from 'lucide-react';
 
 const darkMapStyles: google.maps.MapTypeStyle[] = [
   { elementType: 'geometry', stylers: [{ color: '#0f0f1a' }] },
@@ -38,18 +38,6 @@ export interface GoogleMapProps {
   isAdmin?: boolean;
   sosMarkers?: { lat: number; lng: number; type: string; id: string }[];
   isUberStyle?: boolean;
-  providerInfo?: {
-    name: string;
-    avatar: string;
-    rating: number;
-    carModel?: string;
-    plateNumber?: string;
-    phone?: string;
-  };
-  onPhoneClick?: () => void;
-  onChatClick?: () => void;
-  etaText?: string;
-  distanceText?: string;
   heading?: number | null;
 }
 
@@ -64,16 +52,10 @@ export default function GoogleMapComponent({
   isAdmin = false,
   sosMarkers = [],
   isUberStyle = false,
-  providerInfo,
-  onPhoneClick,
-  onChatClick,
-  etaText,
-  distanceText,
   heading = null,
 }: GoogleMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<google.maps.Map | null>(null);
-  const [showBottomSheet, setShowBottomSheet] = useState(isUberStyle);
   const [loadError, setLoadError] = useState(!HAS_REAL_KEY);
   const [isLoaded, setIsLoaded] = useState(false);
 
@@ -253,7 +235,6 @@ export default function GoogleMapComponent({
   useEffect(() => {
     if (!map || !isLoaded) return;
 
-    // Clear old
     nearbyMarkersRef.current.forEach(m => m.map = null);
     nearbyMarkersRef.current = [];
 
@@ -417,35 +398,6 @@ export default function GoogleMapComponent({
     return (
       <div className="relative w-full h-full">
         <FallbackMap />
-        {isUberStyle && (
-          <>
-            <div className="absolute top-0 left-0 right-0 p-4">
-              <div className="flex items-center justify-between">
-                <div className="bg-tireno-dark/90 backdrop-blur-sm rounded-xl px-4 py-2 border border-white/[0.06]">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-tireno-orange animate-pulse" />
-                    <span className="text-white text-sm font-medium">Live Tracking</span>
-                  </div>
-                </div>
-                <div className="bg-tireno-dark/90 backdrop-blur-sm rounded-xl px-4 py-2 border border-white/[0.06]">
-                  <div className="flex items-center gap-2">
-                    <Clock size={14} className="text-tireno-orange" />
-                    <span className="text-white text-sm font-medium">{etaText || '4 min'}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <BottomSheet
-              providerInfo={providerInfo}
-              etaText={etaText}
-              distanceText={distanceText}
-              onPhoneClick={onPhoneClick}
-              onChatClick={onChatClick}
-              showBottomSheet={showBottomSheet}
-              setShowBottomSheet={setShowBottomSheet}
-            />
-          </>
-        )}
         {isAdmin && (
           <div className="absolute bottom-4 left-4 bg-tireno-dark/80 backdrop-blur-sm rounded-xl p-3 border border-white/[0.06]">
             <div className="flex items-center gap-3 text-white/40 text-[10px]">
@@ -464,38 +416,7 @@ export default function GoogleMapComponent({
     <div className="relative w-full h-full">
       <div ref={mapRef} style={{ width: '100%', height, position: 'absolute', inset: 0 }} />
 
-      {/* Uber-style Overlay - Top bar */}
-      {isUberStyle && (
-        <div className="absolute top-0 left-0 right-0 p-4">
-          <div className="flex items-center justify-between">
-            <div className="bg-tireno-dark/90 backdrop-blur-sm rounded-xl px-4 py-2 border border-white/[0.06]">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-tireno-orange animate-pulse" />
-                <span className="text-white text-sm font-medium">Live Tracking</span>
-              </div>
-            </div>
-            <div className="bg-tireno-dark/90 backdrop-blur-sm rounded-xl px-4 py-2 border border-white/[0.06]">
-              <div className="flex items-center gap-2">
-                <Clock size={14} className="text-tireno-orange" />
-                <span className="text-white text-sm font-medium">{etaText || '4 min'}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Bottom Sheet */}
-      <BottomSheet
-        providerInfo={providerInfo}
-        etaText={etaText}
-        distanceText={distanceText}
-        onPhoneClick={onPhoneClick}
-        onChatClick={onChatClick}
-        showBottomSheet={showBottomSheet}
-        setShowBottomSheet={setShowBottomSheet}
-      />
-
-      {/* Map legend for admin */}
+      {/* Admin legend */}
       {isAdmin && (
         <div className="absolute bottom-4 left-4 bg-tireno-dark/80 backdrop-blur-sm rounded-xl p-3 border border-white/[0.06]">
           <div className="flex items-center gap-3 text-white/40 text-[10px]">
@@ -507,96 +428,5 @@ export default function GoogleMapComponent({
         </div>
       )}
     </div>
-  );
-}
-
-function BottomSheet({
-  providerInfo,
-  etaText,
-  distanceText,
-  onPhoneClick,
-  onChatClick,
-  showBottomSheet,
-  setShowBottomSheet,
-}: {
-  providerInfo?: GoogleMapProps['providerInfo'];
-  etaText?: string;
-  distanceText?: string;
-  onPhoneClick?: () => void;
-  onChatClick?: () => void;
-  showBottomSheet: boolean;
-  setShowBottomSheet: (v: boolean) => void;
-}) {
-  if (!providerInfo) return null;
-
-  return (
-    <AnimatePresence>
-      {showBottomSheet && (
-        <motion.div
-          initial={{ y: 300 }}
-          animate={{ y: 0 }}
-          exit={{ y: 300 }}
-          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-          className="absolute bottom-0 left-0 right-0 bg-tireno-dark/95 backdrop-blur-xl border-t border-white/[0.06] rounded-t-3xl overflow-hidden"
-          style={{ maxHeight: '60%' }}
-        >
-          <div className="flex items-center justify-center py-2">
-            <button
-              onClick={() => setShowBottomSheet(!showBottomSheet)}
-              className="w-12 h-1 rounded-full bg-white/20"
-            />
-          </div>
-
-          <div className="px-4 pb-6">
-            <div className="flex items-center justify-center gap-2 mb-4">
-              <div className="bg-tireno-orange/10 rounded-full px-4 py-2 border border-tireno-orange/20 flex items-center gap-2">
-                <Car size={16} className="text-tireno-orange" />
-                <span className="text-tireno-orange font-bold text-sm">Arriving in {etaText || '4 min'}</span>
-              </div>
-              <div className="bg-white/[0.03] rounded-full px-4 py-2 border border-white/[0.06] flex items-center gap-2">
-                <MapPin size={14} className="text-white/40" />
-                <span className="text-white/40 text-sm">{distanceText || '2.3 km'}</span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-4 mb-4">
-              <div className="w-14 h-14 rounded-full bg-gradient-to-br from-tireno-orange to-tireno-orangeDark flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-tireno-orange/20">
-                {providerInfo.avatar}
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-white font-bold text-base">{providerInfo.name}</span>
-                  <div className="flex items-center gap-1 bg-tireno-yellow/10 rounded-full px-2 py-0.5">
-                    <Star size={12} className="text-tireno-yellow fill-tireno-yellow" />
-                    <span className="text-tireno-yellow text-xs font-bold">{providerInfo.rating}</span>
-                  </div>
-                </div>
-                <p className="text-white/40 text-sm">{providerInfo.carModel || 'Toyota Pickup'} • {providerInfo.plateNumber || 'GR-1234-20'}</p>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={onPhoneClick}
-                  className="w-12 h-12 rounded-full bg-tireno-green/10 flex items-center justify-center border border-tireno-green/20 hover:bg-tireno-green/20 transition-colors"
-                >
-                  <Phone size={20} className="text-tireno-green" />
-                </button>
-                <button
-                  onClick={onChatClick}
-                  className="w-12 h-12 rounded-full bg-tireno-orange/10 flex items-center justify-center border border-tireno-orange/20 hover:bg-tireno-orange/20 transition-colors"
-                >
-                  <MessageSquare size={20} className="text-tireno-orange" />
-                </button>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 bg-white/[0.03] rounded-xl px-4 py-3 border border-white/[0.06]">
-              <Shield size={18} className="text-tireno-green" />
-              <span className="text-white/60 text-sm">Ride-or-Tow safety active</span>
-              <span className="text-tireno-green text-xs ml-auto">3 contacts</span>
-            </div>
-          </div>
-        </motion.div>
-      )}
-    </AnimatePresence>
   );
 }

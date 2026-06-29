@@ -1,20 +1,24 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Wrench, Car, Fuel, Battery, MapPin, AlertTriangle, Navigation, X, Radio, Bot, Sparkles } from 'lucide-react';
+import { Wrench, Car, Fuel, Battery, MapPin, AlertTriangle, Navigation, Radio, Bot, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Layout from '../components/Layout';
 import Header from '../components/Header';
 import AIAssistant from '../components/AIAssistant';
+import { useGeolocation } from '../hooks/useGeolocation';
+import { supabase } from '../lib/supabase';
 import { setStore } from '../hooks/useStore';
 
 export default function SOS() {
   const navigate = useNavigate();
+  const { position } = useGeolocation();
   const [selectedService, setSelectedService] = useState<string | null>(null);
   const [address] = useState('Shell Station, Independence Ave, Accra');
   const [notes, setNotes] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
   const [broadcasting, setBroadcasting] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const services = [
     { id: 'mechanic', icon: Wrench, label: 'Mechanic', desc: 'Car breakdown, engine issue' },
@@ -25,12 +29,33 @@ export default function SOS() {
 
   const activeService = services.find(s => s.id === selectedService);
 
-  const handleBroadcast = () => {
+  const handleBroadcast = async () => {
     setShowConfirm(false);
     setBroadcasting(true);
-    setTimeout(() => {
+    setError(null);
+
+    try {
+      const { data, error: insertError } = await supabase
+        .from('jobs')
+        .insert({
+          service_type: selectedService,
+          status: 'pending',
+          driver_name: 'Kwabena',
+          driver_phone: '0244123456',
+          price: 0,
+          eta_minutes: 0,
+          address,
+          payment_method: 'MTN MoMo',
+          created_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+
       setStore('currentJob', {
-        id: 'TRN-' + Math.floor(1000 + Math.random() * 9000),
+        id: data.job_code,
+        dbId: data.id,
         serviceType: selectedService,
         address,
         notes,
@@ -38,7 +63,10 @@ export default function SOS() {
         createdAt: new Date().toISOString(),
       });
       navigate('/bidding');
-    }, 1500);
+    } catch (err: any) {
+      setError(err.message);
+      setBroadcasting(false);
+    }
   };
 
   return (
@@ -61,8 +89,8 @@ export default function SOS() {
           </div>
           <div className="flex items-center gap-2 mt-2 pt-2 border-t border-white/[0.04]">
             <Navigation size={14} className="text-white/30" />
-            <span className="text-white/30 text-xs">GPS accuracy: 3m</span>
-            <span className="text-tireno-green text-xs ml-auto">Live tracking</span>
+            <span className="text-white/30 text-xs">GPS: {position.lat.toFixed(4)}, {position.lng.toFixed(4)}</span>
+            <span className="text-tireno-green text-xs ml-auto">{position.accuracy ? `±${Math.round(position.accuracy)}m` : 'Live'}</span>
           </div>
         </motion.div>
 
@@ -80,26 +108,24 @@ export default function SOS() {
                   key={s.id}
                   initial={{ opacity: 0, y: 15 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.15 + i * 0.05 }}
+                  transition={{ delay: 0.1 + i * 0.05 }}
                   whileTap={{ scale: 0.95 }}
                   onClick={() => setSelectedService(s.id)}
-                  className={`card-dark p-4 flex flex-col items-start gap-2 transition-all duration-300 ${active ? 'border-tireno-orange/40 ring-1 ring-tireno-orange/20' : ''}`}
+                  className={`card-dark p-4 flex flex-col items-center gap-2 text-center transition-all ${
+                    active ? 'border-tireno-orange/40 ring-1 ring-tireno-orange/20' : ''
+                  }`}
                 >
-                  <div className={`w-10 h-10 rounded-xl bg-gradient-to-br from-white/10 to-white/5 flex items-center justify-center transition-all ${active ? 'scale-110' : ''}`}>
-                    <s.icon size={20} className={active ? 'text-tireno-orange' : 'text-white/60'} />
+                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all ${
+                    active ? 'bg-tireno-orange/10 border border-tireno-orange/20' : 'bg-white/[0.03] border border-white/[0.06]'
+                  }`}>
+                    <s.icon size={24} className={active ? 'text-tireno-orange' : 'text-white/30'} />
                   </div>
                   <div>
-                    <p className={`text-sm font-semibold transition-colors ${active ? 'text-white' : 'text-white/70'}`}>{s.label}</p>
-                    <p className="text-white/30 text-xs">{s.desc}</p>
+                    <p className={`text-sm font-medium ${active ? 'text-white' : 'text-white/30'}`}>{s.label}</p>
+                    <p className="text-white/20 text-xs">{s.desc}</p>
                   </div>
                   {active && (
-                    <motion.div
-                      initial={{ scale: 0 }}
-                      animate={{ scale: 1 }}
-                      className="absolute top-2 right-2 w-5 h-5 rounded-full bg-tireno-orange flex items-center justify-center"
-                    >
-                      <span className="text-white text-xs font-bold">✓</span>
-                    </motion.div>
+                    <div className="w-2 h-2 rounded-full bg-tireno-orange animate-pulse" />
                   )}
                 </motion.button>
               );
@@ -107,35 +133,24 @@ export default function SOS() {
           </div>
         </motion.div>
 
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="mt-4"
-        >
-          <label className="text-white/40 text-xs font-medium tracking-wider uppercase mb-2 block">Additional notes</label>
-          <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="Describe the issue..."
-            className="input-dark w-full h-28 resize-none text-sm"
-          />
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.35 }}
-          className="card-dark p-4 mt-4 flex items-start gap-3 border-l-2 border-l-tireno-yellow"
-        >
-          <div className="w-8 h-8 rounded-lg bg-tireno-yellow/10 flex items-center justify-center border border-tireno-yellow/20 shrink-0 mt-0.5">
-            <AlertTriangle size={16} className="text-tireno-yellow" />
-          </div>
-          <div>
-            <p className="text-white font-medium text-sm">Stay safe</p>
-            <p className="text-white/30 text-xs mt-1 leading-relaxed">Stay in your vehicle if on a busy road. Turn on hazard lights. Your location is shared with providers.</p>
-          </div>
-        </motion.div>
+        {selectedService && activeService && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="card-dark p-4 mt-4"
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <AlertTriangle size={16} className="text-tireno-orange" />
+              <span className="text-tireno-orange font-medium text-sm">Additional Info</span>
+            </div>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Describe your issue (e.g., flat tire on rear left, engine won't start, etc.)"
+              className="w-full h-24 bg-white/[0.03] border border-white/[0.06] rounded-xl p-3 text-white text-sm placeholder:text-white/20 resize-none"
+            />
+          </motion.div>
+        )}
 
         {/* AI Assistant Button */}
         <motion.div
@@ -168,18 +183,23 @@ export default function SOS() {
         >
           <motion.button
             whileTap={{ scale: 0.95 }}
-            disabled={!selectedService}
+            disabled={!selectedService || broadcasting}
             onClick={() => setShowConfirm(true)}
             className="w-full btn-orange py-5 text-base font-bold disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <div className="flex items-center justify-center gap-3">
-              <div className="relative">
-                <Radio size={22} className="text-white" />
-                <div className="absolute inset-0 w-5 h-5 rounded-full bg-white/20 animate-ping" />
-              </div>
-              <span>Broadcast SOS</span>
+              {broadcasting ? (
+                <div className="w-5 h-5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+              ) : (
+                <div className="relative">
+                  <Radio size={22} className="text-white" />
+                  <div className="absolute inset-0 w-5 h-5 rounded-full bg-white/20 animate-ping" />
+                </div>
+              )}
+              <span>{broadcasting ? 'Broadcasting...' : 'Broadcast SOS'}</span>
             </div>
           </motion.button>
+          {error && <p className="text-tireno-red text-xs text-center mt-2">{error}</p>}
           <p className="text-white/20 text-xs text-center mt-3">Providers within 15km will be notified</p>
         </motion.div>
       </div>
@@ -192,42 +212,39 @@ export default function SOS() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+            className="fixed inset-0 z-50 bg-black/70 flex items-end justify-center"
           >
             <motion.div
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="bg-tireno-dark rounded-2xl p-6 w-full max-w-sm border border-white/[0.06]"
+              initial={{ y: 100 }}
+              animate={{ y: 0 }}
+              exit={{ y: 100 }}
+              className="bg-tireno-dark rounded-t-2xl p-6 w-full max-w-lg border-t border-white/[0.06]"
             >
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-white font-bold text-lg">Confirm SOS</h3>
-                <button onClick={() => setShowConfirm(false)} className="w-8 h-8 rounded-lg bg-white/[0.03] border border-white/[0.06] flex items-center justify-center hover:bg-white/[0.06] transition-colors">
-                  <X size={16} className="text-white/50" />
+              <div className="text-center mb-6">
+                <div className="w-16 h-16 rounded-full bg-tireno-orange/10 flex items-center justify-center mx-auto mb-4 border border-tireno-orange/20">
+                  <AlertTriangle size={32} className="text-tireno-orange" />
+                </div>
+                <h2 className="text-white font-bold text-xl mb-2">Confirm SOS</h2>
+                <p className="text-white/40 text-sm">
+                  You are about to broadcast a <span className="text-tireno-orange font-medium">{activeService?.label}</span> request to nearby providers.
+                </p>
+              </div>
+              <div className="space-y-3">
+                <motion.button
+                  whileTap={{ scale: 0.95 }}
+                  onClick={handleBroadcast}
+                  disabled={broadcasting}
+                  className="w-full btn-orange py-4 text-base font-bold"
+                >
+                  Yes, Broadcast Now
+                </motion.button>
+                <button
+                  onClick={() => setShowConfirm(false)}
+                  className="w-full bg-white/[0.03] text-white/60 py-4 rounded-xl font-medium border border-white/[0.06]"
+                >
+                  Cancel
                 </button>
               </div>
-              <div className="card-dark p-3 mb-4 border-l-2 border-l-tireno-orange">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-tireno-orange text-sm font-semibold">{activeService?.label}</span>
-                </div>
-                <p className="text-white/40 text-xs">{address}</p>
-                {notes && <p className="text-white/30 text-xs mt-1">{notes}</p>}
-              </div>
-              <p className="text-white/40 text-sm mb-4 leading-relaxed">This will broadcast your request to nearby providers. You will receive bids within 3 minutes.</p>
-              <motion.button
-                whileTap={{ scale: 0.95 }}
-                onClick={handleBroadcast}
-                className="w-full btn-orange py-4 font-bold"
-              >
-                {broadcasting ? (
-                  <div className="flex items-center justify-center gap-2">
-                    <div className="w-5 h-5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-                    <span>Broadcasting...</span>
-                  </div>
-                ) : (
-                  'Confirm & Broadcast'
-                )}
-              </motion.button>
             </motion.div>
           </motion.div>
         )}

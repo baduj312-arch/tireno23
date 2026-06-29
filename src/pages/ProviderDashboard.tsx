@@ -1,23 +1,28 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, ClipboardList, DollarSign, User, Star,
-  TrendingUp, Clock, CheckCircle, X, Wrench, Car, MapPin,
+  TrendingUp, Clock, CheckCircle, X, Wrench, MapPin,
   Shield, ArrowUpRight, ArrowDownLeft, ChevronRight,
   ToggleLeft, ToggleRight, Navigation
 } from 'lucide-react';
 import GoogleMapComponent from '../components/GoogleMap';
 import { useGeolocation } from '../hooks/useGeolocation';
+import { useRealtimePositions } from '../hooks/useRealtimeTracking';
+import { supabase } from '../lib/supabase';
 
 export default function ProviderDashboard() {
   const navigate = useNavigate();
   const { position } = useGeolocation();
+  const { driverPos, updatePosition } = useRealtimePositions('provider_1');
   const [isOpen, setIsOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [showBidModal, setShowBidModal] = useState(false);
   const [bidAmount, setBidAmount] = useState('85');
   const [bidEta, setBidEta] = useState('5');
+  const [pendingJobs, setPendingJobs] = useState<any[]>([]);
+  const [myJobs, setMyJobs] = useState<any[]>([]);
 
   const earnings = [
     { day: 'Mon', amount: 120 },
@@ -37,29 +42,67 @@ export default function ProviderDashboard() {
     { label: 'Response Time', value: '3.2m', icon: Clock },
   ];
 
-  const sosRequests = [
-    { id: 'SOS-2847', lat: 5.6047, lng: -0.1860, service: 'mechanic', icon: Wrench, label: 'Mechanic', distance: '2.3 km', address: 'Shell Station, Independence Ave', urgency: 'normal', estimated: 'GH₵60-90' },
-    { id: 'SOS-2848', lat: 5.6020, lng: -0.1890, service: 'tow', icon: Car, label: 'Tow Truck', distance: '5.1 km', address: 'Tema Motorway', urgency: 'urgent', estimated: 'GH₵120-180' },
-  ];
+  // Fetch pending jobs from Supabase
+  useEffect(() => {
+    const fetchPending = async () => {
+      const { data } = await supabase
+        .from('jobs')
+        .select('*')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(5);
+      if (data) setPendingJobs(data);
+    };
+    fetchPending();
 
-  const jobs = [
-    { id: 'TRN-3847', service: 'Mechanic', status: 'en_route', customer: 'Kwabena O.', price: 85, time: '10:30 AM', lat: 5.6047, lng: -0.1860 },
-    { id: 'TRN-3842', service: 'Tow', status: 'completed', customer: 'Abena D.', price: 150, time: 'Jun 24', lat: 5.6020, lng: -0.1890 },
-    { id: 'TRN-3839', service: 'Fuel', status: 'completed', customer: 'Yaw K.', price: 45, time: 'Jun 20', lat: 5.6050, lng: -0.1850 },
-  ];
+    const channel = supabase
+      .channel('pending_jobs')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, () => fetchPending())
+      .subscribe();
 
-  const earningsHistory = [
-    { id: '1', type: 'credit', amount: 85, description: 'Job TRN-3847', date: 'Jun 28', status: 'completed' },
-    { id: '2', type: 'debit', amount: 8.5, description: 'Platform fee (10%)', date: 'Jun 28', status: 'fee' },
-    { id: '3', type: 'credit', amount: 150, description: 'Job TRN-3842', date: 'Jun 24', status: 'completed' },
-    { id: '4', type: 'debit', amount: 15, description: 'Platform fee (10%)', date: 'Jun 24', status: 'fee' },
-  ];
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
+  // Fetch provider's assigned jobs
+  useEffect(() => {
+    const fetchMyJobs = async () => {
+      const { data } = await supabase
+        .from('jobs')
+        .select('*')
+        .eq('status', 'assigned')
+        .order('created_at', { ascending: false })
+        .limit(5);
+      if (data) setMyJobs(data);
+    };
+    fetchMyJobs();
+  }, []);
+
+  // Sync provider position to Supabase
+  useEffect(() => {
+    if (!position || position.lat === 5.6037) return;
+    updatePosition(position.lat, position.lng, position.heading, position.speed, position.accuracy);
+  }, [position, updatePosition]);
 
   const trustScore = 94;
   const trustBreakdown = {
     rating: 4.8 * 10 * 0.5,
     success: 98 * 0.3,
     response: Math.max(0, (5 - 3.2) * 20 * 0.2),
+  };
+
+  const handleSubmitBid = async () => {
+    const selectedJob = pendingJobs[0];
+    if (!selectedJob) return;
+
+    const { error } = await supabase.from('bids').insert({
+      job_id: selectedJob.id,
+      provider_id: 'provider_1',
+      price: parseFloat(bidAmount),
+      eta_minutes: parseInt(bidEta),
+      status: 'pending',
+    });
+
+    if (!error) setShowBidModal(false);
   };
 
   return (
@@ -120,7 +163,7 @@ export default function ProviderDashboard() {
                   <h3 className="text-white font-semibold text-sm">Live SOS Requests</h3>
                   <div className="flex items-center gap-1">
                     <div className="w-2 h-2 rounded-full bg-tireno-orange animate-pulse" />
-                    <span className="text-tireno-orange text-xs font-medium">2 new</span>
+                    <span className="text-tireno-orange text-xs font-medium">{pendingJobs.length} new</span>
                   </div>
                 </div>
                 <div className="card-dark rounded-2xl overflow-hidden h-48">
@@ -129,36 +172,45 @@ export default function ProviderDashboard() {
                     height="100%"
                     showDriverMarker={true}
                     showProviderMarker={false}
-                    showNearbyProviders={sosRequests.map(r => ({ lat: r.lat, lng: r.lng, name: r.label, category: r.service }))}
+                    showNearbyProviders={pendingJobs.map(j => ({
+                      lat: driverPos.lat + (Math.random() - 0.5) * 0.01,
+                      lng: driverPos.lng + (Math.random() - 0.5) * 0.01,
+                      name: j.service_type || 'Unknown',
+                      category: j.service_type || 'mechanic',
+                    }))}
                   />
                 </div>
               </div>
 
-              {/* SOS Cards */}
+              {/* SOS Cards from real jobs */}
               <div className="space-y-3 mb-4">
-                {sosRequests.map((sos, i) => (
-                  <motion.div key={sos.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.1 }} className="card-dark p-4">
+                {pendingJobs.length === 0 && (
+                  <div className="card-dark p-6 text-center">
+                    <p className="text-white/30 text-sm">No active SOS requests nearby</p>
+                    <p className="text-white/20 text-xs mt-1">Stay online to receive notifications</p>
+                  </div>
+                )}
+                {pendingJobs.map((job, i) => (
+                  <motion.div key={job.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.1 }} className="card-dark p-4">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2">
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${sos.urgency === 'urgent' ? 'bg-tireno-red/10' : 'bg-tireno-orange/10'}`}>
-                          <sos.icon size={16} className={sos.urgency === 'urgent' ? 'text-tireno-red' : 'text-tireno-orange'} />
+                        <div className="w-8 h-8 rounded-lg bg-tireno-orange/10 flex items-center justify-center">
+                          <Wrench size={16} className="text-tireno-orange" />
                         </div>
                         <div>
-                          <p className="text-white text-sm font-medium">{sos.label}</p>
-                          <p className="text-white/20 text-xs">{sos.id}</p>
+                          <p className="text-white text-sm font-medium capitalize">{job.service_type}</p>
+                          <p className="text-white/20 text-xs">{job.job_code}</p>
                         </div>
                       </div>
-                      {sos.urgency === 'urgent' && <span className="badge-red text-[10px]">URGENT</span>}
                     </div>
                     <div className="flex items-center gap-2 text-white/30 text-xs mb-3">
                       <MapPin size={12} />
-                      <span>{sos.address}</span>
-                      <span className="text-tireno-orange">{sos.distance}</span>
+                      <span>{job.address}</span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-white/30 text-xs">Est: {sos.estimated}</span>
+                      <span className="text-white/30 text-xs">Est: GH₵{job.price || 60}-{job.price || 90}</span>
                       <div className="flex gap-2">
-                        <button onClick={() => setShowBidModal(true)} className="bg-tireno-orange text-white text-xs font-bold px-4 py-2 rounded-lg">Place Bid</button>
+                        <button onClick={() => { setShowBidModal(true); }} className="bg-tireno-orange text-white text-xs font-bold px-4 py-2 rounded-lg">Place Bid</button>
                         <button className="bg-white/[0.03] text-white/30 text-xs font-medium px-4 py-2 rounded-lg border border-white/[0.06]">Skip</button>
                       </div>
                     </div>
@@ -191,22 +243,28 @@ export default function ProviderDashboard() {
           {activeTab === 'jobs' && (
             <motion.div key="jobs" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
               <h3 className="text-white font-semibold text-sm mb-2">My Jobs</h3>
-              {jobs.map((job, i) => (
+              {myJobs.length === 0 && (
+                <div className="card-dark p-6 text-center">
+                  <p className="text-white/30 text-sm">No assigned jobs</p>
+                  <p className="text-white/20 text-xs mt-1">Jobs you win will appear here</p>
+                </div>
+              )}
+              {myJobs.map((job, i) => (
                 <motion.div key={job.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }} className="card-dark p-4">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-white text-sm font-medium">{job.id}</span>
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full ${job.status === 'en_route' ? 'bg-tireno-orange/10 text-tireno-orange' : 'bg-tireno-green/10 text-tireno-green'}`}>
-                      {job.status.replace('_', ' ')}
+                    <span className="text-white text-sm font-medium">{job.job_code}</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-tireno-orange/10 text-tireno-orange">
+                      {job.status}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-white text-sm">{job.service}</p>
-                      <p className="text-white/30 text-xs">{job.customer}</p>
+                      <p className="text-white text-sm capitalize">{job.service_type}</p>
+                      <p className="text-white/30 text-xs">{job.driver_name}</p>
                     </div>
                     <span className="text-white font-bold text-sm">GH₵{job.price}</span>
                   </div>
-                  <p className="text-white/30 text-xs mt-2">{job.time}</p>
+                  <p className="text-white/30 text-xs mt-2">{job.eta_minutes} min ETA</p>
                 </motion.div>
               ))}
             </motion.div>
@@ -226,7 +284,12 @@ export default function ProviderDashboard() {
               </div>
               <h3 className="text-white font-semibold text-sm mb-2">Transactions</h3>
               <div className="space-y-2">
-                {earningsHistory.map((tx) => (
+                {[
+                  { id: '1', type: 'credit', amount: 85, description: 'Job TRN-3847', date: 'Jun 28' },
+                  { id: '2', type: 'debit', amount: 8.5, description: 'Platform fee (10%)', date: 'Jun 28' },
+                  { id: '3', type: 'credit', amount: 150, description: 'Job TRN-3842', date: 'Jun 24' },
+                  { id: '4', type: 'debit', amount: 15, description: 'Platform fee (10%)', date: 'Jun 24' },
+                ].map((tx) => (
                   <div key={tx.id} className="card-dark p-4 flex items-center gap-3">
                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${tx.type === 'credit' ? 'bg-tireno-green/10' : 'bg-tireno-red/10'}`}>
                       {tx.type === 'credit' ? <ArrowDownLeft size={18} className="text-tireno-green" /> : <ArrowUpRight size={18} className="text-tireno-red" />}
@@ -295,7 +358,7 @@ export default function ProviderDashboard() {
               </div>
               <div className="flex gap-3">
                 <button onClick={() => setShowBidModal(false)} className="flex-1 btn-ghost py-4 text-base font-medium">Cancel</button>
-                <button onClick={() => setShowBidModal(false)} className="flex-1 btn-orange py-4 text-base font-bold">Submit Bid</button>
+                <button onClick={handleSubmitBid} className="flex-1 btn-orange py-4 text-base font-bold">Submit Bid</button>
               </div>
             </motion.div>
           </motion.div>

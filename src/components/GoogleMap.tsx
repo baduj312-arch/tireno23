@@ -1,9 +1,7 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { GoogleMap, useJsApiLoader, Marker, DirectionsRenderer } from '@react-google-maps/api';
+import { useEffect, useRef, useState } from 'react';
+import { importLibrary, setOptions } from '@googlemaps/js-api-loader';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Navigation, Phone, MessageSquare, Car, Clock, Shield, Star, MapPin, AlertTriangle } from 'lucide-react';
-
-const mapContainerStyle: React.CSSProperties = { width: '100%', height: '100%', borderRadius: '0px' };
+import { Phone, MessageSquare, Car, Clock, Shield, Star, MapPin, AlertTriangle } from 'lucide-react';
 
 const darkMapStyles: google.maps.MapTypeStyle[] = [
   { elementType: 'geometry', stylers: [{ color: '#0f0f1a' }] },
@@ -24,8 +22,6 @@ const darkMapStyles: google.maps.MapTypeStyle[] = [
   { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#4a5d7e' }] },
   { featureType: 'water', elementType: 'labels.text.stroke', stylers: [{ color: '#0a1a2e' }] },
 ];
-
-const libraries: ("places" | "geometry" | "drawing" | "visualization")[] = ['geometry'];
 
 const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 const HAS_REAL_KEY = API_KEY && API_KEY !== 'YOUR_GOOGLE_MAPS_API_KEY' && !API_KEY.includes('Dummy');
@@ -60,7 +56,6 @@ export interface GoogleMapProps {
 export default function GoogleMapComponent({
   driverLocation = { lat: 5.6037, lng: -0.1870 },
   providerLocation,
-  showRoute = false,
   height = '100%',
   showProviderMarker = true,
   showDriverMarker = true,
@@ -76,38 +71,75 @@ export default function GoogleMapComponent({
   distanceText,
   heading = null,
 }: GoogleMapProps) {
-  const [loadError, setLoadError] = useState(!HAS_REAL_KEY);
-  const { isLoaded, loadError: googleError } = useJsApiLoader({
-    googleMapsApiKey: API_KEY || '',
-    libraries,
-  });
-
-  const [directions, setDirections] = useState<google.maps.DirectionsResult | null>(null);
+  const mapRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const [showBottomSheet, setShowBottomSheet] = useState(isUberStyle);
+  const [loadError, setLoadError] = useState(!HAS_REAL_KEY);
+  const [isLoaded, setIsLoaded] = useState(false);
+
   const directionsServiceRef = useRef<google.maps.DirectionsService | null>(null);
+  const directionsRendererRef = useRef<google.maps.DirectionsRenderer | null>(null);
   const trafficLayerRef = useRef<google.maps.TrafficLayer | null>(null);
-  const driverMarkerRef = useRef<google.maps.Marker | null>(null);
-  const providerMarkerRef = useRef<google.maps.Marker | null>(null);
+  const driverMarkerRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
+  const providerMarkerRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
+  const nearbyMarkersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
+  const sosMarkersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
 
-  // Detect Google Maps load error
+  // Load Google Maps SDK natively using v2 functional API
   useEffect(() => {
-    if (googleError) {
+    if (!HAS_REAL_KEY) {
       setLoadError(true);
+      return;
     }
-  }, [googleError]);
+    if (isLoaded) return;
 
-  // Initialize traffic layer when map loads
-  const onMapLoad = useCallback((m: google.maps.Map) => {
-    setMap(m);
-    if (isUberStyle) {
-      const trafficLayer = new google.maps.TrafficLayer();
-      trafficLayer.setMap(m);
-      trafficLayerRef.current = trafficLayer;
+    setOptions({ key: API_KEY, v: 'weekly', libraries: ['geometry', 'marker'] });
+
+    importLibrary('maps')
+      .then(() => importLibrary('marker'))
+      .then(() => importLibrary('geometry'))
+      .then(() => {
+        setIsLoaded(true);
+      })
+      .catch(() => {
+        setLoadError(true);
+      });
+  }, [isLoaded]);
+
+  // Initialize native map
+  useEffect(() => {
+    if (!isLoaded || !mapRef.current || map) return;
+
+    const nativeMap = new google.maps.Map(mapRef.current, {
+      center: driverLocation,
+      zoom: 15,
+      mapTypeId: 'roadmap',
+      disableDefaultUI: true,
+      zoomControl: false,
+      streetViewControl: false,
+      mapTypeControl: false,
+      fullscreenControl: false,
+      styles: darkMapStyles,
+      gestureHandling: 'greedy',
+      tilt: isUberStyle ? 45 : 0,
+    });
+
+    setMap(nativeMap);
+
+    if (onMapClick) {
+      nativeMap.addListener('click', onMapClick);
     }
-  }, [isUberStyle]);
+  }, [isLoaded, map, driverLocation, isUberStyle, onMapClick]);
 
-  // Smoothly pan camera to center between driver and provider
+  // Add traffic layer
+  useEffect(() => {
+    if (!map || !isUberStyle) return;
+    const traffic = new google.maps.TrafficLayer();
+    traffic.setMap(map);
+    trafficLayerRef.current = traffic;
+  }, [map, isUberStyle]);
+
+  // Smooth camera pan to center both driver and provider
   useEffect(() => {
     if (!map || !providerLocation || !driverLocation) return;
 
@@ -129,12 +161,25 @@ export default function GoogleMapComponent({
     };
   }, [map, driverLocation, providerLocation]);
 
-  // Calculate and display route
+  // Calculate and render route using native DirectionsService
   useEffect(() => {
-    if (!isLoaded || !providerLocation || !driverLocation || loadError) return;
+    if (!map || !providerLocation || !driverLocation || !isLoaded) return;
+
     if (!directionsServiceRef.current) {
       directionsServiceRef.current = new google.maps.DirectionsService();
     }
+    if (!directionsRendererRef.current) {
+      directionsRendererRef.current = new google.maps.DirectionsRenderer({
+        map,
+        suppressMarkers: true,
+        polylineOptions: {
+          strokeColor: '#FF6B2C',
+          strokeWeight: 5,
+          strokeOpacity: 0.9,
+        },
+      });
+    }
+
     directionsServiceRef.current.route(
       {
         origin: driverLocation,
@@ -143,84 +188,138 @@ export default function GoogleMapComponent({
       },
       (result, status) => {
         if (status === google.maps.DirectionsStatus.OK && result) {
-          setDirections(result);
+          directionsRendererRef.current?.setDirections(result);
         }
       }
     );
-  }, [isLoaded, providerLocation, driverLocation, loadError]);
+  }, [map, isLoaded, providerLocation, driverLocation]);
 
-  // Create / update driver marker with rotation
+  // Create / update driver marker using native AdvancedMarkerElement
   useEffect(() => {
-    if (!map || !showDriverMarker || loadError) return;
+    if (!map || !showDriverMarker || !isLoaded) return;
 
     const h = heading || 0;
-    const svgIcon = encodeURIComponent(
+    const svg = `data:image/svg+xml;utf8,${encodeURIComponent(
       `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><circle cx="16" cy="16" r="10" fill="#FF6B2C" stroke="#fff" stroke-width="2"/><circle cx="16" cy="16" r="4" fill="white" opacity="0.5"/><polygon points="16,6 18,14 16,12 14,14" fill="white" transform="rotate(${h}, 16, 16)"/></svg>`
-    );
+    )}`;
 
     if (driverMarkerRef.current) {
-      driverMarkerRef.current.setPosition(driverLocation);
-      driverMarkerRef.current.setIcon({
-        url: `data:image/svg+xml;utf8,${svgIcon}`,
-        scaledSize: new google.maps.Size(32, 32),
-        anchor: new google.maps.Point(16, 16),
-      });
+      driverMarkerRef.current.position = driverLocation;
+      if (driverMarkerRef.current.content) {
+        const img = driverMarkerRef.current.content as HTMLElement;
+        img.style.transform = `rotate(${h}deg)`;
+      }
     } else {
-      driverMarkerRef.current = new google.maps.Marker({
-        position: driverLocation,
+      const el = document.createElement('img');
+      el.src = svg;
+      el.style.width = '32px';
+      el.style.height = '32px';
+      el.style.transform = `rotate(${h}deg)`;
+      el.style.transition = 'transform 0.3s ease';
+      driverMarkerRef.current = new google.maps.marker.AdvancedMarkerElement({
         map,
-        icon: {
-          url: `data:image/svg+xml;utf8,${svgIcon}`,
-          scaledSize: new google.maps.Size(32, 32),
-          anchor: new google.maps.Point(16, 16),
-        },
+        position: driverLocation,
+        content: el,
         zIndex: 100,
       });
     }
-  }, [map, driverLocation, heading, showDriverMarker, loadError]);
+  }, [map, driverLocation, heading, showDriverMarker, isLoaded]);
 
-  // Create / update provider marker with car icon
+  // Create / update provider marker using native AdvancedMarkerElement
   useEffect(() => {
-    if (!map || !showProviderMarker || !providerLocation || loadError) return;
+    if (!map || !showProviderMarker || !providerLocation || !isLoaded) return;
 
-    const svgCar = encodeURIComponent(
+    const svg = `data:image/svg+xml;utf8,${encodeURIComponent(
       `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28"><rect x="4" y="8" width="20" height="12" rx="3" fill="#22C55E" stroke="#fff" stroke-width="2"/><rect x="8" y="12" width="4" height="4" rx="1" fill="white" opacity="0.7"/><rect x="16" y="12" width="4" height="4" rx="1" fill="white" opacity="0.7"/><rect x="10" y="6" width="8" height="4" rx="2" fill="#22C55E" stroke="#fff" stroke-width="1.5"/></svg>`
-    );
+    )}`;
 
     if (providerMarkerRef.current) {
-      providerMarkerRef.current.setPosition(providerLocation);
+      providerMarkerRef.current.position = providerLocation;
     } else {
-      providerMarkerRef.current = new google.maps.Marker({
-        position: providerLocation,
+      const el = document.createElement('img');
+      el.src = svg;
+      el.style.width = '28px';
+      el.style.height = '28px';
+      providerMarkerRef.current = new google.maps.marker.AdvancedMarkerElement({
         map,
-        icon: {
-          url: `data:image/svg+xml;utf8,${svgCar}`,
-          scaledSize: new google.maps.Size(28, 28),
-          anchor: new google.maps.Point(14, 14),
-        },
+        position: providerLocation,
+        content: el,
         zIndex: 101,
       });
     }
-  }, [map, providerLocation, showProviderMarker, loadError]);
+  }, [map, providerLocation, showProviderMarker, isLoaded]);
 
-  // Cleanup markers on unmount
+  // Nearby provider markers
+  useEffect(() => {
+    if (!map || !isLoaded) return;
+
+    // Clear old
+    nearbyMarkersRef.current.forEach(m => m.map = null);
+    nearbyMarkersRef.current = [];
+
+    showNearbyProviders.forEach((p) => {
+      const el = document.createElement('div');
+      el.style.width = '16px';
+      el.style.height = '16px';
+      el.style.borderRadius = '50%';
+      el.style.background = '#3B82F6';
+      el.style.border = '1px solid white';
+      el.style.opacity = '0.7';
+      const marker = new google.maps.marker.AdvancedMarkerElement({
+        map,
+        position: { lat: p.lat, lng: p.lng },
+        content: el,
+        title: p.name,
+      });
+      nearbyMarkersRef.current.push(marker);
+    });
+  }, [map, showNearbyProviders, isLoaded]);
+
+  // SOS markers for admin
+  useEffect(() => {
+    if (!map || !isAdmin || !isLoaded) return;
+
+    sosMarkersRef.current.forEach(m => m.map = null);
+    sosMarkersRef.current = [];
+
+    const getSosColor = (type: string) => {
+      switch (type) {
+        case 'mechanic': return '#FF6B2C';
+        case 'tow': return '#3B82F6';
+        case 'fuel': return '#EAB308';
+        case 'battery': return '#22C55E';
+        default: return '#EF4444';
+      }
+    };
+
+    sosMarkers.forEach((sos) => {
+      const el = document.createElement('div');
+      el.style.width = '20px';
+      el.style.height = '20px';
+      el.style.borderRadius = '50%';
+      el.style.background = getSosColor(sos.type);
+      el.style.border = '2px solid white';
+      el.style.animation = 'ping 1s cubic-bezier(0, 0, 0.2, 1) infinite';
+      const marker = new google.maps.marker.AdvancedMarkerElement({
+        map,
+        position: { lat: sos.lat, lng: sos.lng },
+        content: el,
+      });
+      sosMarkersRef.current.push(marker);
+    });
+  }, [map, isAdmin, sosMarkers, isLoaded]);
+
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      driverMarkerRef.current?.setMap(null);
-      providerMarkerRef.current?.setMap(null);
+      driverMarkerRef.current?.map && (driverMarkerRef.current.map = null);
+      providerMarkerRef.current?.map && (providerMarkerRef.current.map = null);
+      nearbyMarkersRef.current.forEach(m => m.map = null);
+      sosMarkersRef.current.forEach(m => m.map = null);
+      directionsRendererRef.current?.setMap(null);
       trafficLayerRef.current?.setMap(null);
     };
   }, []);
-
-  const getSosColor = (type: string) => {
-    switch (type) {
-      case 'mechanic': return '#FF6B2C';
-      case 'tow': return '#3B82F6';
-      case 'fuel': return '#EAB308';
-      case 'battery': return '#22C55E';
-      default: return '#EF4444';
-    }
-  };
 
   // Fallback map when no API key
   const FallbackMap = () => {
@@ -228,21 +327,18 @@ export default function GoogleMapComponent({
     const dLng = driverLocation?.lng ?? -0.1870;
     const pLat = providerLocation?.lat ?? dLat + 0.003;
     const pLng = providerLocation?.lng ?? dLng + 0.002;
+
     return (
       <div className="relative w-full h-full bg-[#0f0f1a] overflow-hidden">
-        {/* Grid background */}
         <div className="absolute inset-0" style={{
           backgroundImage: 'linear-gradient(rgba(255,107,44,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,107,44,0.04) 1px, transparent 1px)',
           backgroundSize: '28px 28px'
         }} />
-
-        {/* Roads */}
         <div className="absolute top-[30%] left-0 right-0 h-[2px] bg-[#1e1e2e]" />
         <div className="absolute top-[60%] left-0 right-0 h-[2px] bg-[#1e1e2e]" />
         <div className="absolute top-0 bottom-0 left-[25%] w-[2px] bg-[#1e1e2e]" />
         <div className="absolute top-0 bottom-0 left-[70%] w-[2px] bg-[#1e1e2e]" />
 
-        {/* Route path */}
         <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
           <motion.path
             d={`M ${20 + (dLng + 0.187) * 2000} ${75 - (dLat - 5.603) * 2000} Q 50 50 ${20 + (pLng + 0.187) * 2000} ${75 - (pLat - 5.603) * 2000}`}
@@ -256,7 +352,6 @@ export default function GoogleMapComponent({
           />
         </svg>
 
-        {/* Driver marker */}
         <div
           className="absolute w-8 h-8 -translate-x-1/2 -translate-y-1/2"
           style={{ left: `${20 + (dLng + 0.187) * 2000}%`, top: `${75 - (dLat - 5.603) * 2000}%` }}
@@ -264,12 +359,11 @@ export default function GoogleMapComponent({
           <div className="relative w-full h-full">
             <div className="absolute inset-0 rounded-full bg-tireno-orange/30 animate-ping" />
             <div className="absolute inset-1 rounded-full bg-tireno-orange border-2 border-white flex items-center justify-center">
-              <Navigation size={14} className="text-white" style={{ transform: `rotate(${heading || 0}deg)` }} />
+              <MapPin size={14} className="text-white" />
             </div>
           </div>
         </div>
 
-        {/* Provider marker */}
         <div
           className="absolute w-7 h-7 -translate-x-1/2 -translate-y-1/2"
           style={{ left: `${20 + (pLng + 0.187) * 2000}%`, top: `${75 - (pLat - 5.603) * 2000}%` }}
@@ -279,7 +373,6 @@ export default function GoogleMapComponent({
           </div>
         </div>
 
-        {/* Nearby providers */}
         {showNearbyProviders.map((p, i) => (
           <div
             key={i}
@@ -288,20 +381,17 @@ export default function GoogleMapComponent({
           />
         ))}
 
-        {/* SOS markers for admin */}
         {isAdmin && sosMarkers.map((sos, i) => (
           <div
             key={i}
             className="absolute w-4 h-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white animate-ping"
-            style={{ left: `${20 + (sos.lng + 0.187) * 2000}%`, top: `${75 - (sos.lat - 5.603) * 2000}%`, backgroundColor: getSosColor(sos.type) }}
+            style={{ left: `${20 + (sos.lng + 0.187) * 2000}%`, top: `${75 - (sos.lat - 5.603) * 2000}%`, backgroundColor: sos.type === 'mechanic' ? '#FF6B2C' : sos.type === 'tow' ? '#3B82F6' : sos.type === 'fuel' ? '#EAB308' : '#22C55E' }}
           />
         ))}
 
-        {/* Traffic overlay */}
         <div className="absolute top-[30%] left-[25%] w-[45%] h-[2px] bg-tireno-red/30" />
         <div className="absolute top-[60%] left-[70%] w-[10%] h-[2px] bg-tireno-green/30" />
 
-        {/* API key warning */}
         <div className="absolute top-4 left-4 right-4">
           <div className="bg-tireno-dark/90 backdrop-blur-sm rounded-xl px-4 py-2 border border-tireno-yellow/20 flex items-center gap-2">
             <AlertTriangle size={14} className="text-tireno-yellow shrink-0" />
@@ -323,11 +413,10 @@ export default function GoogleMapComponent({
     );
   }
 
-  if (loadError || !isLoaded) {
+  if (loadError) {
     return (
       <div className="relative w-full h-full">
         <FallbackMap />
-        {/* Uber overlays still work on fallback */}
         {isUberStyle && (
           <>
             <div className="absolute top-0 left-0 right-0 p-4">
@@ -373,73 +462,7 @@ export default function GoogleMapComponent({
 
   return (
     <div className="relative w-full h-full">
-      <GoogleMap
-        mapContainerStyle={{ ...mapContainerStyle, height }}
-        center={driverLocation}
-        zoom={15}
-        options={{
-          mapTypeId: 'roadmap',
-          disableDefaultUI: true,
-          zoomControl: false,
-          streetViewControl: false,
-          mapTypeControl: false,
-          fullscreenControl: false,
-          styles: darkMapStyles,
-          gestureHandling: 'greedy',
-          tilt: isUberStyle ? 45 : 0,
-        }}
-        onLoad={onMapLoad}
-        onClick={onMapClick}
-      >
-        {/* React-Marker for nearby providers */}
-        {showNearbyProviders.map((p, i) => (
-          <Marker
-            key={i}
-            position={{ lat: p.lat, lng: p.lng }}
-            icon={{
-              path: google.maps.SymbolPath.CIRCLE,
-              fillColor: '#3B82F6',
-              fillOpacity: 0.7,
-              strokeColor: '#fff',
-              strokeWeight: 1,
-              scale: 8,
-            }}
-            title={p.name}
-          />
-        ))}
-
-        {/* SOS Markers for Admin */}
-        {isAdmin && sosMarkers.map((sos, i) => (
-          <Marker
-            key={i}
-            position={{ lat: sos.lat, lng: sos.lng }}
-            icon={{
-              path: google.maps.SymbolPath.CIRCLE,
-              fillColor: getSosColor(sos.type),
-              fillOpacity: 1,
-              strokeColor: '#fff',
-              strokeWeight: 2,
-              scale: 10,
-            }}
-            animation={google.maps.Animation.BOUNCE}
-          />
-        ))}
-
-        {/* Route */}
-        {showRoute && directions && (
-          <DirectionsRenderer
-            directions={directions}
-            options={{
-              suppressMarkers: true,
-              polylineOptions: {
-                strokeColor: '#FF6B2C',
-                strokeWeight: 5,
-                strokeOpacity: 0.9,
-              },
-            }}
-          />
-        )}
-      </GoogleMap>
+      <div ref={mapRef} style={{ width: '100%', height, position: 'absolute', inset: 0 }} />
 
       {/* Uber-style Overlay - Top bar */}
       {isUberStyle && (
@@ -487,7 +510,6 @@ export default function GoogleMapComponent({
   );
 }
 
-// Bottom Sheet component
 function BottomSheet({
   providerInfo,
   etaText,
@@ -518,7 +540,6 @@ function BottomSheet({
           className="absolute bottom-0 left-0 right-0 bg-tireno-dark/95 backdrop-blur-xl border-t border-white/[0.06] rounded-t-3xl overflow-hidden"
           style={{ maxHeight: '60%' }}
         >
-          {/* Drag handle */}
           <div className="flex items-center justify-center py-2">
             <button
               onClick={() => setShowBottomSheet(!showBottomSheet)}
@@ -526,9 +547,7 @@ function BottomSheet({
             />
           </div>
 
-          {/* Provider Info */}
           <div className="px-4 pb-6">
-            {/* ETA Banner */}
             <div className="flex items-center justify-center gap-2 mb-4">
               <div className="bg-tireno-orange/10 rounded-full px-4 py-2 border border-tireno-orange/20 flex items-center gap-2">
                 <Car size={16} className="text-tireno-orange" />
@@ -540,7 +559,6 @@ function BottomSheet({
               </div>
             </div>
 
-            {/* Provider Card */}
             <div className="flex items-center gap-4 mb-4">
               <div className="w-14 h-14 rounded-full bg-gradient-to-br from-tireno-orange to-tireno-orangeDark flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-tireno-orange/20">
                 {providerInfo.avatar}
@@ -571,7 +589,6 @@ function BottomSheet({
               </div>
             </div>
 
-            {/* Safety Badge */}
             <div className="flex items-center gap-2 bg-white/[0.03] rounded-xl px-4 py-3 border border-white/[0.06]">
               <Shield size={18} className="text-tireno-green" />
               <span className="text-white/60 text-sm">Ride-or-Tow safety active</span>
